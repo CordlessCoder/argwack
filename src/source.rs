@@ -6,13 +6,13 @@ enum Saved<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ArgSource<'slice, 'a> {
-    args: &'slice [&'a str],
+pub struct ArgSource<'a, I> {
+    args: I,
     saved: Saved<'a>,
 }
 
-impl<'slice, 'a> ArgSource<'slice, 'a> {
-    pub fn new(args: &'slice [&'a str]) -> Self {
+impl<'a, I: Iterator<Item = &'a str>> ArgSource<'a, I> {
+    pub fn new(args: I) -> Self {
         Self {
             args,
             saved: Saved::Empty,
@@ -20,13 +20,14 @@ impl<'slice, 'a> ArgSource<'slice, 'a> {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum ArgSegment<'s> {
     Short(u8),
     Long(&'s str),
     Value(&'s str),
 }
 
-impl<'s> ArgSource<'_, 's> {
+impl<'s, I: Iterator<Item = &'s str>> ArgSource<'s, I> {
     pub fn next_value(&mut self) -> Option<&'s str> {
         match self.saved {
             Saved::Value(val) => {
@@ -36,16 +37,16 @@ impl<'s> ArgSource<'_, 's> {
             Saved::Shorts([]) => {
                 self.saved = Saved::Empty;
             }
-            Saved::Shorts(_) => {
-                return None;
+            Saved::Shorts(looks_like_a_value) => {
+                self.saved = Saved::Empty;
+                return Some(core::str::from_utf8(looks_like_a_value).unwrap());
             }
             Saved::Empty => (),
         }
-        let (&first, rest) = self.args.split_first()?;
+        let first = self.args.next()?;
         if first.starts_with('-') {
             return None;
         }
-        self.args = rest;
         Some(first)
     }
     pub fn next(&mut self) -> Option<ArgSegment<'s>> {
@@ -63,8 +64,7 @@ impl<'s> ArgSource<'_, 's> {
                 return Some(ArgSegment::Short(*first));
             }
         }
-        let (&first, rest) = self.args.split_first()?;
-        self.args = rest;
+        let first = self.args.next()?;
         match first.as_bytes() {
             [b'-', b'-', name @ ..] => {
                 let mut name = name;
@@ -89,4 +89,3 @@ impl<'s> ArgSource<'_, 's> {
         }
     }
 }
-

@@ -1,18 +1,32 @@
-use std::{fmt::Display, marker::PhantomData, num::NonZeroU8};
 use crate::ArgumentValue;
+use std::{
+    fmt::{Debug, Display},
+    marker::PhantomData,
+    num::NonZeroU8,
+};
 
 #[derive(Debug, Default)]
 pub struct Arg<'s, T: ArgumentValue<'s>> {
-    pub(crate) ctx: ArgContext,
-    pub(crate) out: T,
-    pub(crate) _phantom: PhantomData<&'s T>,
+    pub ctx: ArgContext,
+    pub out: T,
+    pub(crate) _phantom: PhantomData<&'s ()>,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct ArgContext {
     pub short: Option<NonZeroU8>,
     pub long: Option<&'static str>,
     pub help: Option<&'static str>,
+}
+
+impl Debug for ArgContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArgContext")
+            .field("short", &self.short.map(|v| v.get() as char))
+            .field("long", &self.long)
+            .field("help", &self.help)
+            .finish()
+    }
 }
 
 impl Display for ArgContext {

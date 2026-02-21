@@ -9,11 +9,33 @@ use crate::arg::{Arg, ArgContext};
 mod source;
 mod values;
 use source::*;
+pub use values::{OptFromStrWrapper, SetViaRef};
 
 pub mod prelude {
-    pub use crate::{ArgError, arg::Arg, new_opt, Arguments};
-}
+    use std::str::FromStr;
 
+    pub use crate::{ArgError, Arguments, OptFromStrWrapper, arg::Arg};
+    use crate::{ArgumentValue, values::SetViaRef};
+
+    pub fn new_opt<'s, T: FromStr>() -> Arg<'s, OptFromStrWrapper<T>>
+    where
+        OptFromStrWrapper<T>: ArgumentValue<'s>,
+    {
+        Arg::new(OptFromStrWrapper::NotFound)
+    }
+    pub fn new_opt_none<'s, T>() -> Arg<'s, Option<T>>
+    where
+        Option<T>: ArgumentValue<'s>,
+    {
+        Arg::new(None)
+    }
+    pub fn opt_by_ref<'m, 's, T: ArgumentValue<'s>>(v: &'m mut T) -> Arg<'s, SetViaRef<'m, T>>
+    where
+        's: 'm,
+    {
+        Arg::new(SetViaRef(v))
+    }
+}
 
 #[derive(Debug, Clone, Error)]
 pub enum ArgError<'s> {
@@ -27,63 +49,52 @@ pub enum ArgError<'s> {
     UnknownLongOption(&'s str),
 }
 
-pub fn new_opt<'s, T>() -> Arg<'s, Option<T>>
-where
-    Option<T>: ArgumentValue<'s>,
-{
-    Arg::new(None)
-}
-
 pub trait ArgumentValue<'s>: Sized {
     fn capture(
         &mut self,
         ctx: &ArgContext,
-        source: &mut ArgSource<'_, 's>,
+        source: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
     ) -> Result<(), ArgError<'s>>;
 }
 
 pub trait ArgumentList<'s> {
+    type Values;
+
     fn capture_short_arg(
         &mut self,
-        args: &mut ArgSource<'_, 's>,
+        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
         name: u8,
     ) -> Result<bool, ArgError<'s>>;
     fn capture_long_arg(
         &mut self,
-        args: &mut ArgSource<'_, 's>,
+        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
         name: &str,
     ) -> Result<bool, ArgError<'s>>;
+    fn into_values(self) -> Self::Values;
 }
 
 pub struct Empty;
 impl<'s> ArgumentList<'s> for Empty {
+    type Values = ();
+
+    #[inline(always)]
     fn capture_short_arg(
         &mut self,
-        _args: &mut ArgSource<'_, '_>,
+        _args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
         _name: u8,
     ) -> Result<bool, ArgError<'s>> {
         Ok(false)
     }
+    #[inline(always)]
     fn capture_long_arg(
         &mut self,
-        _args: &mut ArgSource<'_, '_>,
+        _args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
         _name: &str,
     ) -> Result<bool, ArgError<'s>> {
         Ok(false)
     }
-}
 
-impl<'s, T> Arg<'s, Option<T>>
-where
-    Option<T>: ArgumentValue<'s>,
-{
-    pub fn new_opt() -> Self {
-        Self {
-            ctx: ArgContext::empty(),
-            out: None,
-            _phantom: PhantomData,
-        }
-    }
+    fn into_values(self) -> Self::Values {}
 }
 
 impl Arg<'_, bool> {
@@ -98,6 +109,15 @@ impl Arg<'_, u32> {
     }
 }
 
+impl<'s, T: ArgumentValue<'s> + Default> Arg<'s, T> {
+    pub fn empty() -> Self {
+        Self {
+            ctx: ArgContext::empty(),
+            out: Default::default(),
+            _phantom: PhantomData,
+        }
+    }
+}
 impl<'s, T: ArgumentValue<'s>> Arg<'s, T> {
     pub fn new(val: T) -> Self {
         Self {
@@ -121,9 +141,12 @@ impl<'s, T: ArgumentValue<'s>> Arg<'s, T> {
 }
 
 impl<'s, T: ArgumentValue<'s>> ArgumentList<'s> for Arg<'s, T> {
+    type Values = T;
+
+    #[inline(always)]
     fn capture_short_arg(
         &mut self,
-        args: &mut ArgSource<'_, 's>,
+        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
         name: u8,
     ) -> Result<bool, ArgError<'s>> {
         let Some(short) = self.ctx.short else {
@@ -135,9 +158,10 @@ impl<'s, T: ArgumentValue<'s>> ArgumentList<'s> for Arg<'s, T> {
         self.out.capture(&self.ctx, args)?;
         Ok(true)
     }
+    #[inline(always)]
     fn capture_long_arg(
         &mut self,
-        args: &mut ArgSource<'_, 's>,
+        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
         name: &str,
     ) -> Result<bool, ArgError<'s>> {
         let Some(long) = self.ctx.long else {
@@ -149,16 +173,23 @@ impl<'s, T: ArgumentValue<'s>> ArgumentList<'s> for Arg<'s, T> {
         self.out.capture(&self.ctx, args)?;
         Ok(true)
     }
+
+    fn into_values(self) -> Self::Values {
+        self.out
+    }
 }
 
 pub struct More<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>> {
-    rest: A,
-    arg: Arg<'s, T>,
+    pub rest: A,
+    pub arg: Arg<'s, T>,
 }
 impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>> ArgumentList<'s> for More<'s, T, A> {
+    type Values = (A::Values, T);
+
+    #[inline]
     fn capture_short_arg(
         &mut self,
-        args: &mut ArgSource<'_, 's>,
+        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
         name: u8,
     ) -> Result<bool, ArgError<'s>> {
         if self.arg.capture_short_arg(args, name)? {
@@ -166,9 +197,10 @@ impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>> ArgumentList<'s> for More<'s
         }
         self.rest.capture_short_arg(args, name)
     }
+    #[inline]
     fn capture_long_arg(
         &mut self,
-        args: &mut ArgSource<'_, 's>,
+        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
         name: &str,
     ) -> Result<bool, ArgError<'s>> {
         if self.arg.capture_long_arg(args, name)? {
@@ -176,10 +208,14 @@ impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>> ArgumentList<'s> for More<'s
         }
         self.rest.capture_long_arg(args, name)
     }
+
+    fn into_values(self) -> Self::Values {
+        (self.rest.into_values(), self.arg.into_values())
+    }
 }
 
 pub struct Arguments<A, S> {
-    args: A,
+    pub args: A,
     sink: S,
 }
 
@@ -272,7 +308,7 @@ impl<'s, A: ArgumentList<'s>, S: ArgumentSink<'s>> Arguments<A, S> {
         }
     }
     pub fn parse(&mut self, args: &[&'s str]) -> Result<(), ArgError<'s>> {
-        let mut source = ArgSource::new(args);
+        let mut source = ArgSource::new(args.iter().copied());
         while let Some(segment) = source.next() {
             match segment {
                 ArgSegment::Short(short) => {
@@ -291,5 +327,9 @@ impl<'s, A: ArgumentList<'s>, S: ArgumentSink<'s>> Arguments<A, S> {
             }
         }
         Ok(())
+    }
+    pub fn finish(self) -> (A::Values, S) {
+        let Self { args, sink } = self;
+        (args.into_values(), sink)
     }
 }
