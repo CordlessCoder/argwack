@@ -6,8 +6,10 @@ use thiserror::Error;
 mod arg;
 use crate::arg::{Arg, ArgContext};
 
+mod help;
 mod source;
 mod values;
+pub use help::HelpMessage;
 use source::*;
 pub use values::{OptFromStrWrapper, SetViaRef};
 
@@ -71,6 +73,7 @@ pub trait ArgumentList<'s> {
         name: &str,
     ) -> Result<bool, ArgError<'s>>;
     fn into_values(self) -> Self::Values;
+    fn visit_ctxs<E>(&self, cb: &mut impl FnMut(&ArgContext) -> Result<(), E>) -> Result<(), E>;
 }
 
 pub struct Empty;
@@ -92,6 +95,9 @@ impl<'s> ArgumentList<'s> for Empty {
         _name: &str,
     ) -> Result<bool, ArgError<'s>> {
         Ok(false)
+    }
+    fn visit_ctxs<E>(&self, _cb: &mut impl FnMut(&ArgContext) -> Result<(), E>) -> Result<(), E> {
+        Ok(())
     }
 
     fn into_values(self) -> Self::Values {}
@@ -177,6 +183,9 @@ impl<'s, T: ArgumentValue<'s>> ArgumentList<'s> for Arg<'s, T> {
     fn into_values(self) -> Self::Values {
         self.out
     }
+    fn visit_ctxs<E>(&self, cb: &mut impl FnMut(&ArgContext) -> Result<(), E>) -> Result<(), E> {
+        cb(&self.ctx)
+    }
 }
 
 pub struct More<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>> {
@@ -212,11 +221,16 @@ impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>> ArgumentList<'s> for More<'s
     fn into_values(self) -> Self::Values {
         (self.rest.into_values(), self.arg.into_values())
     }
+    fn visit_ctxs<E>(&self, cb: &mut impl FnMut(&ArgContext) -> Result<(), E>) -> Result<(), E> {
+        self.rest.visit_ctxs(cb)?;
+        cb(&self.arg.ctx)
+    }
 }
 
 pub struct Arguments<A, S> {
     pub args: A,
     sink: S,
+    program_name: Option<&'static str>,
 }
 
 impl Arguments<Empty, ()> {
@@ -224,17 +238,23 @@ impl Arguments<Empty, ()> {
         Self {
             args: Empty,
             sink: (),
+            program_name: None,
         }
     }
 }
 impl<S> Arguments<Empty, S> {
     pub fn new_with_sink(sink: S) -> Self {
-        Self { args: Empty, sink }
+        Self {
+            args: Empty,
+            sink,
+            program_name: None,
+        }
     }
     pub fn add<'s, T: ArgumentValue<'s>>(self, argument: Arg<'s, T>) -> Arguments<Arg<'s, T>, S> {
         Arguments {
             args: argument,
             sink: self.sink,
+            program_name: self.program_name,
         }
     }
 }
@@ -244,13 +264,18 @@ impl<'s, T: ArgumentValue<'s>, S> Arguments<Arg<'s, T>, S> {
         self,
         argument: Arg<'s, O>,
     ) -> Arguments<More<'s, O, Arg<'s, T>>, S> {
-        let Self { args, sink } = self;
+        let Self {
+            args,
+            sink,
+            program_name,
+        } = self;
         Arguments {
             args: More {
                 rest: args,
                 arg: argument,
             },
             sink,
+            program_name,
         }
     }
 }
@@ -266,6 +291,7 @@ impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>, S> Arguments<More<'s, T, A>,
                 arg: argument,
             },
             sink: self.sink,
+            program_name: self.program_name,
         }
     }
 }
@@ -301,11 +327,20 @@ impl<'s, C: FnMut(&'s str) -> Result<(), ArgError<'s>>> ArgumentSink<'s> for C {
 
 impl<'s, A: ArgumentList<'s>, S: ArgumentSink<'s>> Arguments<A, S> {
     pub fn with_sink<NS: ArgumentSink<'s>>(self, new_sink: NS) -> Arguments<A, NS> {
-        let Self { args, sink: _sink } = self;
+        let Self {
+            args,
+            sink: _sink,
+            program_name,
+        } = self;
         Arguments {
             args,
             sink: new_sink,
+            program_name,
         }
+    }
+    pub fn with_program_name(mut self, name: &'static str) -> Self {
+        self.program_name = Some(name);
+        self
     }
     pub fn parse(&mut self, args: &[&'s str]) -> Result<(), ArgError<'s>> {
         let mut source = ArgSource::new(args.iter().copied());
@@ -328,8 +363,15 @@ impl<'s, A: ArgumentList<'s>, S: ArgumentSink<'s>> Arguments<A, S> {
         }
         Ok(())
     }
-    pub fn finish(self) -> (A::Values, S) {
-        let Self { args, sink } = self;
+    pub fn into_values(self) -> (A::Values, S) {
+        let Self {
+            args,
+            sink,
+            program_name: _,
+        } = self;
         (args.into_values(), sink)
+    }
+    pub fn help_msg<'a>(&'a self) -> HelpMessage<'a, A, S> {
+        HelpMessage(self)
     }
 }

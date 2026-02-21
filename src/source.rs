@@ -30,18 +30,15 @@ pub enum ArgSegment<'s> {
 impl<'s, I: Iterator<Item = &'s str>> ArgSource<'s, I> {
     pub fn next_value(&mut self) -> Option<&'s str> {
         match self.saved {
+            Saved::Empty | Saved::Shorts([]) => (),
             Saved::Value(val) => {
                 self.saved = Saved::Empty;
                 return Some(val);
-            }
-            Saved::Shorts([]) => {
-                self.saved = Saved::Empty;
             }
             Saved::Shorts(looks_like_a_value) => {
                 self.saved = Saved::Empty;
                 return Some(core::str::from_utf8(looks_like_a_value).unwrap());
             }
-            Saved::Empty => (),
         }
         let first = self.args.next()?;
         if first.starts_with('-') {
@@ -51,13 +48,10 @@ impl<'s, I: Iterator<Item = &'s str>> ArgSource<'s, I> {
     }
     pub fn next(&mut self) -> Option<ArgSegment<'s>> {
         match self.saved {
-            Saved::Empty => (),
+            Saved::Empty | Saved::Shorts([]) => (),
             Saved::Value(val) => {
                 self.saved = Saved::Empty;
                 return Some(ArgSegment::Value(val));
-            }
-            Saved::Shorts([]) => {
-                self.saved = Saved::Empty;
             }
             Saved::Shorts([first, rest @ ..]) => {
                 self.saved = Saved::Shorts(rest);
