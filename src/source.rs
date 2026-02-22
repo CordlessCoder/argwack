@@ -12,6 +12,7 @@ pub struct ArgSource<'s, 'a> {
 }
 
 impl<'s, 'a> ArgSource<'s, 'a> {
+    #[inline(always)]
     pub fn new(args: &'s [&'a str]) -> Self {
         Self {
             args: args.iter(),
@@ -28,6 +29,7 @@ pub enum ArgSegment<'s> {
 }
 
 impl<'s, 'a> ArgSource<'s, 'a> {
+    #[inline(always)]
     pub fn next_value(&mut self) -> Option<&'a str> {
         match self.saved {
             Saved::Empty | Saved::Shorts([]) => (),
@@ -46,6 +48,7 @@ impl<'s, 'a> ArgSource<'s, 'a> {
         }
         Some(first)
     }
+    #[inline(always)]
     pub fn next(&mut self) -> Option<ArgSegment<'a>> {
         match self.saved {
             Saved::Empty | Saved::Shorts([]) => (),

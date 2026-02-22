@@ -1,6 +1,7 @@
 #![expect(clippy::should_implement_trait)]
 use std::marker::PhantomData;
 
+use rustc_hash::FxHashMap;
 use thiserror::Error;
 
 mod arg;
@@ -19,18 +20,21 @@ pub mod prelude {
     pub use crate::{ArgError, Arguments, OptFromStrWrapper, arg::Arg};
     use crate::{ArgumentValue, values::SetViaRef};
 
-    pub fn new_opt<'s, T: FromStr>() -> Arg<'s, OptFromStrWrapper<T>>
+    #[inline(always)]
+    pub fn opt_from_str<'s, T: FromStr>() -> Arg<'s, OptFromStrWrapper<T>>
     where
         OptFromStrWrapper<T>: ArgumentValue<'s>,
     {
         Arg::new(OptFromStrWrapper::NotFound)
     }
-    pub fn new_opt_none<'s, T>() -> Arg<'s, Option<T>>
+    #[inline(always)]
+    pub fn opt_none<'s, T>() -> Arg<'s, Option<T>>
     where
         Option<T>: ArgumentValue<'s>,
     {
         Arg::new(None)
     }
+    #[inline(always)]
     pub fn opt_by_ref<'m, 's, T: ArgumentValue<'s>>(v: &'m mut T) -> Arg<'s, SetViaRef<'m, T>>
     where
         's: 'm,
@@ -298,6 +302,7 @@ pub struct Arguments<A, S> {
     program_name: Option<&'static str>,
     // NOTE: Intentionally 1 less than [u8::MAX], as 0 isn't a valid shorthand
     short_lut: [u16; 255],
+    long_map: FxHashMap<&'static str, u16>,
 }
 
 const fn empty_lut() -> [u16; 255] {
@@ -314,43 +319,53 @@ fn add_to_lut(lut: &mut [u16; 255], ctx: &ArgContext) {
     lut[short.get().wrapping_sub(1) as usize] = 0;
 }
 
+fn add_to_map(map: &mut FxHashMap<&'static str, u16>, ctx: &ArgContext) {
+    map.values_mut().for_each(|idx| *idx += 1);
+    if let Some(long) = ctx.long {
+        map.insert(long, 0);
+    }
+}
+
 impl Arguments<Empty, ()> {
+    #[inline]
     pub fn new() -> Self {
-        Self {
-            args: Empty,
-            sink: (),
-            program_name: None,
-            short_lut: empty_lut(),
-        }
+        Self::new_with_sink(())
     }
 }
 impl<S> Arguments<Empty, S> {
+    #[inline]
     pub fn new_with_sink(sink: S) -> Self {
         Self {
             args: Empty,
             sink,
             program_name: None,
             short_lut: empty_lut(),
+            long_map: FxHashMap::default(),
         }
     }
+    #[inline]
     pub fn add<'s, T: ArgumentValue<'s>>(self, argument: Arg<'s, T>) -> Arguments<Arg<'s, T>, S> {
         let Self {
             args: _,
             sink,
             program_name,
             mut short_lut,
+            mut long_map,
         } = self;
         add_to_lut(&mut short_lut, &argument.ctx);
+        add_to_map(&mut long_map, &argument.ctx);
         Arguments {
             args: argument,
             sink,
             program_name,
             short_lut,
+            long_map,
         }
     }
 }
 
 impl<'s, T: ArgumentValue<'s>, S> Arguments<Arg<'s, T>, S> {
+    #[inline]
     pub fn add<O: ArgumentValue<'s>>(
         self,
         argument: Arg<'s, O>,
@@ -360,8 +375,10 @@ impl<'s, T: ArgumentValue<'s>, S> Arguments<Arg<'s, T>, S> {
             sink,
             program_name,
             mut short_lut,
+            mut long_map,
         } = self;
         add_to_lut(&mut short_lut, &argument.ctx);
+        add_to_map(&mut long_map, &argument.ctx);
         Arguments {
             args: More {
                 rest: args,
@@ -370,11 +387,13 @@ impl<'s, T: ArgumentValue<'s>, S> Arguments<Arg<'s, T>, S> {
             sink,
             program_name,
             short_lut,
+            long_map,
         }
     }
 }
 
 impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>, S> Arguments<More<'s, T, A>, S> {
+    #[inline]
     pub fn add<O: ArgumentValue<'s>>(
         self,
         argument: Arg<'s, O>,
@@ -384,10 +403,12 @@ impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>, S> Arguments<More<'s, T, A>,
             sink,
             program_name,
             mut short_lut,
+            mut long_map,
         } = self;
         let len = args.len();
         assert!(len < u16::MAX as usize);
         add_to_lut(&mut short_lut, &argument.ctx);
+        add_to_map(&mut long_map, &argument.ctx);
         Arguments {
             args: More {
                 rest: args,
@@ -396,11 +417,13 @@ impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>, S> Arguments<More<'s, T, A>,
             sink,
             program_name,
             short_lut,
+            long_map,
         }
     }
 }
 
 impl Default for Arguments<Empty, ()> {
+    #[inline]
     fn default() -> Self {
         Self::new_with_sink(())
     }
@@ -411,12 +434,14 @@ pub trait ArgumentSink<'s> {
 }
 
 impl<'s> ArgumentSink<'s> for () {
+    #[inline(always)]
     fn consume_value(&mut self, _value: &'s str) -> Result<(), ArgError<'s>> {
         Ok(())
     }
 }
 
 impl<'s> ArgumentSink<'s> for Vec<&'s str> {
+    #[inline(always)]
     fn consume_value(&mut self, value: &'s str) -> Result<(), ArgError<'s>> {
         self.push(value);
         Ok(())
@@ -424,30 +449,36 @@ impl<'s> ArgumentSink<'s> for Vec<&'s str> {
 }
 
 impl<'s, C: FnMut(&'s str) -> Result<(), ArgError<'s>>> ArgumentSink<'s> for C {
+    #[inline(always)]
     fn consume_value(&mut self, value: &'s str) -> Result<(), ArgError<'s>> {
         self(value)
     }
 }
 
 impl<'s, A: ArgumentList<'s>, S: ArgumentSink<'s>> Arguments<A, S> {
+    #[inline(always)]
     pub fn with_sink<NS: ArgumentSink<'s>>(self, new_sink: NS) -> Arguments<A, NS> {
         let Self {
             args,
             sink: _sink,
             program_name,
             short_lut,
+            long_map,
         } = self;
         Arguments {
             args,
             sink: new_sink,
             program_name,
             short_lut,
+            long_map,
         }
     }
+    #[inline(always)]
     pub fn with_program_name(mut self, name: &'static str) -> Self {
         self.program_name = Some(name);
         self
     }
+    #[inline(always)]
     pub fn parse(&mut self, args: &[&'s str]) -> Result<(), ArgError<'s>> {
         let mut source = ArgSource::new(args);
         while let Some(segment) = source.next() {
@@ -463,9 +494,10 @@ impl<'s, A: ArgumentList<'s>, S: ArgumentSink<'s>> Arguments<A, S> {
                     self.args.capture_by_index(&mut source, idx)?;
                 }
                 ArgSegment::Long(long) => {
-                    if !self.args.capture_long_arg(&mut source, long)? {
+                    let Some(&idx) = self.long_map.get(long) else {
                         return Err(ArgError::UnknownLongOption(long));
-                    }
+                    };
+                    self.args.capture_by_index(&mut source, idx)?;
                 }
                 ArgSegment::Value(val) => {
                     self.sink.consume_value(val)?;
@@ -480,6 +512,7 @@ impl<'s, A: ArgumentList<'s>, S: ArgumentSink<'s>> Arguments<A, S> {
             sink,
             program_name: _,
             short_lut: _,
+            long_map: _,
         } = self;
         (args.into_values(), sink)
     }

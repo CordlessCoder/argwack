@@ -3,6 +3,7 @@ use std::str::FromStr;
 use crate::{ArgError, ArgumentValue, arg::ArgContext, source::ArgSource};
 
 impl<'s> ArgumentValue<'s> for bool {
+    #[inline(always)]
     fn capture(
         &mut self,
         _ctx: &ArgContext,
@@ -13,6 +14,7 @@ impl<'s> ArgumentValue<'s> for bool {
     }
 }
 impl<'s> ArgumentValue<'s> for u32 {
+    #[inline(always)]
     fn capture(
         &mut self,
         _ctx: &ArgContext,
@@ -23,6 +25,7 @@ impl<'s> ArgumentValue<'s> for u32 {
     }
 }
 impl<'s> ArgumentValue<'s> for Option<&'s str> {
+    #[inline(always)]
     fn capture(
         &mut self,
         ctx: &ArgContext,
@@ -43,6 +46,7 @@ pub enum OptFromStrWrapper<T: FromStr> {
 }
 
 impl<'s, T: FromStr> ArgumentValue<'s> for OptFromStrWrapper<T> {
+    #[inline(always)]
     fn capture(
         &mut self,
         ctx: &ArgContext,
@@ -64,6 +68,7 @@ impl<'s, T: FromStr> ArgumentValue<'s> for OptFromStrWrapper<T> {
 pub struct SetViaRef<'m, T>(pub &'m mut T);
 
 impl<'m, 's, T: ArgumentValue<'s>> ArgumentValue<'s> for SetViaRef<'m, T> {
+    #[inline(always)]
     fn capture(
         &mut self,
         ctx: &ArgContext,

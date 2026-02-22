@@ -46,6 +46,7 @@ impl Display for ArgContext {
 }
 
 impl ArgContext {
+    #[inline(always)]
     pub const fn empty() -> Self {
         Self {
             short: None,
