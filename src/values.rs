@@ -6,7 +6,7 @@ impl<'s> ArgumentValue<'s> for bool {
     fn capture(
         &mut self,
         _ctx: &ArgContext,
-        _args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
+        _args: &mut ArgSource<'_, 's>,
     ) -> Result<(), ArgError<'s>> {
         *self = true;
         Ok(())
@@ -16,7 +16,7 @@ impl<'s> ArgumentValue<'s> for u32 {
     fn capture(
         &mut self,
         _ctx: &ArgContext,
-        _args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
+        _args: &mut ArgSource<'_, 's>,
     ) -> Result<(), ArgError<'s>> {
         *self += 1;
         Ok(())
@@ -26,7 +26,7 @@ impl<'s> ArgumentValue<'s> for Option<&'s str> {
     fn capture(
         &mut self,
         ctx: &ArgContext,
-        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
+        args: &mut ArgSource<'_, 's>,
     ) -> Result<(), ArgError<'s>> {
         let value = args
             .next_value()
@@ -46,7 +46,7 @@ impl<'s, T: FromStr> ArgumentValue<'s> for OptFromStrWrapper<T> {
     fn capture(
         &mut self,
         ctx: &ArgContext,
-        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
+        args: &mut ArgSource<'_, 's>,
     ) -> Result<(), ArgError<'s>> {
         let value = args
             .next_value()
@@ -67,7 +67,7 @@ impl<'m, 's, T: ArgumentValue<'s>> ArgumentValue<'s> for SetViaRef<'m, T> {
     fn capture(
         &mut self,
         ctx: &ArgContext,
-        args: &mut ArgSource<'s, impl Iterator<Item = &'s str>>,
+        args: &mut ArgSource<'_, 's>,
     ) -> Result<(), ArgError<'s>> {
         self.0.capture(ctx, args)
     }

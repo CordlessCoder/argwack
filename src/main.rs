@@ -38,7 +38,7 @@ fn main() {
 
     let start = Instant::now();
     for _ in 0..1_000_000 {
-        args.parse(black_box(&["", "-q", "-q", "-q", "-q", "-q", "-q"]))
+        args.parse(black_box(&["", "-q", "-w", "-q", "-q", "-q", "-q"]))
             .unwrap();
         black_box(&args);
     }

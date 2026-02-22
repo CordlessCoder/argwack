@@ -6,15 +6,15 @@ enum Saved<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct ArgSource<'a, I> {
-    args: I,
+pub struct ArgSource<'s, 'a> {
+    args: core::slice::Iter<'s, &'a str>,
     saved: Saved<'a>,
 }
 
-impl<'a, I: Iterator<Item = &'a str>> ArgSource<'a, I> {
-    pub fn new(args: I) -> Self {
+impl<'s, 'a> ArgSource<'s, 'a> {
+    pub fn new(args: &'s [&'a str]) -> Self {
         Self {
-            args,
+            args: args.iter(),
             saved: Saved::Empty,
         }
     }
@@ -27,8 +27,8 @@ pub enum ArgSegment<'s> {
     Value(&'s str),
 }
 
-impl<'s, I: Iterator<Item = &'s str>> ArgSource<'s, I> {
-    pub fn next_value(&mut self) -> Option<&'s str> {
+impl<'s, 'a> ArgSource<'s, 'a> {
+    pub fn next_value(&mut self) -> Option<&'a str> {
         match self.saved {
             Saved::Empty | Saved::Shorts([]) => (),
             Saved::Value(val) => {
@@ -46,7 +46,7 @@ impl<'s, I: Iterator<Item = &'s str>> ArgSource<'s, I> {
         }
         Some(first)
     }
-    pub fn next(&mut self) -> Option<ArgSegment<'s>> {
+    pub fn next(&mut self) -> Option<ArgSegment<'a>> {
         match self.saved {
             Saved::Empty | Saved::Shorts([]) => (),
             Saved::Value(val) => {
