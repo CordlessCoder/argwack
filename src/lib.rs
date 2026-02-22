@@ -59,6 +59,7 @@ pub trait ArgumentValue<'s> {
     ) -> Result<(), ArgError<'s>>;
 }
 
+#[expect(clippy::len_without_is_empty)]
 pub trait ArgumentList<'s> {
     type Values;
 
@@ -77,7 +78,11 @@ pub trait ArgumentList<'s> {
     fn visit_ctxs<E>(&self, cb: &mut impl FnMut(&ArgContext) -> Result<(), E>) -> Result<(), E>;
     // TODO: Replace dynamic dispatch with contunuation-passing/capture-by-index
     /// Find the Arg corresponding to a given index
-    fn lookup_index(&mut self, index: u8) -> Option<(ArgContext, &mut dyn ArgumentValue<'s>)>;
+    fn capture_by_index(
+        &mut self,
+        args: &mut ArgSource<'_, 's>,
+        index: u16,
+    ) -> Result<(), ArgError<'s>>;
     fn len(&self) -> usize;
 }
 
@@ -109,8 +114,12 @@ impl<'s> ArgumentList<'s> for Empty {
     #[inline(always)]
     fn into_values(self) -> Self::Values {}
     #[inline(always)]
-    fn lookup_index(&mut self, _index: u8) -> Option<(ArgContext, &mut dyn ArgumentValue<'s>)> {
-        None
+    fn capture_by_index(
+        &mut self,
+        _args: &mut ArgSource<'_, 's>,
+        _index: u16,
+    ) -> Result<(), ArgError<'s>> {
+        unreachable!()
     }
     #[inline(always)]
     fn len(&self) -> usize {
@@ -211,11 +220,15 @@ impl<'s, T: ArgumentValue<'s>> ArgumentList<'s> for Arg<'s, T> {
         cb(&self.ctx)
     }
     #[inline(always)]
-    fn lookup_index(&mut self, index: u8) -> Option<(ArgContext, &mut dyn ArgumentValue<'s>)> {
+    fn capture_by_index(
+        &mut self,
+        args: &mut ArgSource<'_, 's>,
+        index: u16,
+    ) -> Result<(), ArgError<'s>> {
         if index != 0 {
-            return None;
+            unreachable!()
         }
-        Some((self.ctx, &mut self.out))
+        self.out.capture(&self.ctx, args)
     }
     #[inline(always)]
     fn len(&self) -> usize {
@@ -263,11 +276,15 @@ impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>> ArgumentList<'s> for More<'s
         cb(&self.arg.ctx)
     }
     #[inline(always)]
-    fn lookup_index(&mut self, index: u8) -> Option<(ArgContext, &mut dyn ArgumentValue<'s>)> {
+    fn capture_by_index(
+        &mut self,
+        args: &mut ArgSource<'_, 's>,
+        index: u16,
+    ) -> Result<(), ArgError<'s>> {
         if index == 0 {
-            return Some((self.arg.ctx, &mut self.arg.out));
+            return self.arg.out.capture(&self.arg.ctx, args);
         }
-        self.rest.lookup_index(index - 1)
+        self.rest.capture_by_index(args, index - 1)
     }
     #[inline(always)]
     fn len(&self) -> usize {
@@ -279,23 +296,22 @@ pub struct Arguments<A, S> {
     pub args: A,
     sink: S,
     program_name: Option<&'static str>,
-    // TODO: Support for more than 255 options(use something other than u8)
-    short_lut: [u8; 256],
+    // NOTE: Intentionally 1 less than [u8::MAX], as 0 isn't a valid shorthand
+    short_lut: [u16; 255],
 }
 
-const fn empty_lut() -> [u8; 256] {
-    [u8::MAX; _]
+const fn empty_lut() -> [u16; 255] {
+    [u16::MAX; _]
 }
 
-fn add_to_lut(lut: &mut [u8; 256], ctx: &ArgContext) {
-    // NOTE: Needs to be adjusted if the option limit is changed
+fn add_to_lut(lut: &mut [u16; 255], ctx: &ArgContext) {
     lut.iter_mut()
-        .filter(|&&mut idx| idx != u8::MAX)
+        .filter(|&&mut idx| idx != u16::MAX)
         .for_each(|idx| *idx += 1);
     let Some(short) = ctx.short else {
         return;
     };
-    lut[short.get() as usize] = 0;
+    lut[short.get().wrapping_sub(1) as usize] = 0;
 }
 
 impl Arguments<Empty, ()> {
@@ -370,8 +386,7 @@ impl<'s, T: ArgumentValue<'s>, A: ArgumentList<'s>, S> Arguments<More<'s, T, A>,
             mut short_lut,
         } = self;
         let len = args.len();
-        // NOTE: Needs to be relaxed if the argument count limit is increased
-        assert!(len < 255);
+        assert!(len < u16::MAX as usize);
         add_to_lut(&mut short_lut, &argument.ctx);
         Arguments {
             args: More {
@@ -437,19 +452,15 @@ impl<'s, A: ArgumentList<'s>, S: ArgumentSink<'s>> Arguments<A, S> {
         let mut source = ArgSource::new(args);
         while let Some(segment) = source.next() {
             match segment {
+                ArgSegment::Short(0) => {
+                    return Err(ArgError::UnknownShortOption('\0'));
+                }
                 ArgSegment::Short(short) => {
-                    let idx = self.short_lut[short as usize];
-                    if idx == 255 {
+                    let idx = self.short_lut[(short - 1) as usize];
+                    if idx == u16::MAX {
                         return Err(ArgError::UnknownShortOption(short as char));
                     }
-                    let (ctx, val) = self.args.lookup_index(idx).unwrap();
-                    val.capture(&ctx, &mut source)?;
-                    debug_assert!(
-                        ctx.short.is_some_and(|s| s.get() == short),
-                        "{:?} must be equal to {:?}",
-                        ctx.short.map(|v| v.get() as char),
-                        short as char
-                    );
+                    self.args.capture_by_index(&mut source, idx)?;
                 }
                 ArgSegment::Long(long) => {
                     if !self.args.capture_long_arg(&mut source, long)? {
