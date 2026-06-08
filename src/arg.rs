@@ -4,6 +4,8 @@ use std::{
     str::FromStr,
 };
 
+use soa_rs::Soars;
+
 use crate::{ArgError, source::AnyArgSource};
 
 pub enum ArgOut<'out, 'ext> {
@@ -15,6 +17,36 @@ pub enum ArgOut<'out, 'ext> {
     Call(
         &'out mut dyn FnMut(&ArgContext, &mut dyn AnyArgSource<'ext>) -> Result<(), ArgError<'ext>>,
     ),
+}
+
+impl<'o, 'e> ArgOut<'o, 'e> {
+    pub(crate) fn capture(
+        &mut self,
+        ctx: &ArgContext,
+        source: &mut impl AnyArgSource<'e>,
+    ) -> Result<(), ArgError<'e>> {
+        use ArgOut::*;
+        match self {
+            Flag(f) => **f = true,
+            Count(c) => **c += 1,
+            Str(s) => {
+                let value = source
+                    .next_value()
+                    .ok_or(ArgError::MissingValueForOpt(*ctx))?;
+                **s = Some(value);
+            }
+            Int(i) => {
+                capture_from_str(i, ctx, source)?;
+            }
+            Float(f) => {
+                capture_from_str(f, ctx, source)?;
+            }
+            Call(c) => {
+                c(ctx, source)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Debug for ArgOut<'_, '_> {
@@ -52,11 +84,11 @@ impl<'out> From<&'out mut bool> for ArgOut<'out, '_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Soars)]
 #[must_use]
 pub struct Arg<'out, 'ext> {
-    pub ctx: ArgContext,
     pub out: ArgOut<'out, 'ext>,
+    pub ctx: ArgContext,
 }
 
 fn capture_from_str<'ext, T: FromStr>(
@@ -96,40 +128,14 @@ impl<'o, 'e> Arg<'o, 'e> {
         self
     }
     #[inline(always)]
-    pub fn with_long(mut self, long: &'static str) -> Self {
+    pub fn with_long(mut self, long: &'static &'static str) -> Self {
         self.ctx.long = Some(long);
         self
     }
     #[inline(always)]
-    pub fn with_help(mut self, help: &'static str) -> Self {
+    pub fn with_help(mut self, help: &'static &'static str) -> Self {
         self.ctx.help = Some(help);
         self
-    }
-    pub(crate) fn capture(
-        &mut self,
-        source: &mut impl AnyArgSource<'e>,
-    ) -> Result<(), ArgError<'e>> {
-        use ArgOut::*;
-        match &mut self.out {
-            Flag(f) => **f = true,
-            Count(c) => **c += 1,
-            Str(s) => {
-                let value = source
-                    .next_value()
-                    .ok_or(ArgError::MissingValueForOpt(self.ctx))?;
-                **s = Some(value);
-            }
-            Int(i) => {
-                capture_from_str(i, &self.ctx, source)?;
-            }
-            Float(f) => {
-                capture_from_str(f, &self.ctx, source)?;
-            }
-            Call(c) => {
-                c(&self.ctx, source)?;
-            }
-        }
-        Ok(())
     }
 }
 

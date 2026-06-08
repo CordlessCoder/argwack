@@ -1,4 +1,6 @@
+#![deny(clippy::missing_safety_doc)]
 use rustc_hash::FxHashMapSeed;
+use soa_rs::Soa;
 use thiserror::Error;
 
 mod arg;
@@ -55,7 +57,7 @@ pub enum ArgError<'s> {
 
 #[must_use]
 pub struct Arguments<'o, 'i, S> {
-    pub args: Vec<Arg<'o, 'i>>,
+    pub args: Soa<Arg<'o, 'i>>,
     sink: S,
     pub program_name: Option<&'static str>,
     // MAX indicates empty slot
@@ -65,7 +67,7 @@ pub struct Arguments<'o, 'i, S> {
 
 impl Arguments<'_, '_, ()> {
     #[inline(always)]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self::new_with_sink(())
     }
 }
@@ -78,9 +80,9 @@ impl Default for Arguments<'static, 'static, ()> {
 
 impl<S> Arguments<'_, '_, S> {
     #[inline]
-    pub const fn new_with_sink(sink: S) -> Self {
+    pub fn new_with_sink(sink: S) -> Self {
         Self {
-            args: Vec::new(),
+            args: Soa::new(),
             sink,
             program_name: None,
             short_lut: [usize::MAX; _],
@@ -118,13 +120,19 @@ impl<'out, 'ext, S: ArgumentSink<'ext>> Arguments<'out, 'ext, S> {
                     if idx == usize::MAX {
                         return Err(ArgError::UnknownShortOption(short as char));
                     }
-                    self.args[idx].capture(&mut source)?;
+                    // SAFETY: An index may only be inserted into self.short_lut if there is
+                    // already an element there, and elements are never removed.
+                    let arg = unsafe { self.args.get_mut(idx).unwrap_unchecked() };
+                    arg.out.capture(arg.ctx, &mut source)?;
                 }
                 ArgSegment::Long(long) => {
                     let Some(&idx) = self.long_map.get(long) else {
                         return Err(ArgError::UnknownLongOption(long));
                     };
-                    self.args[idx].capture(&mut source)?;
+                    // SAFETY: An index may only be inserted into self.long_map if there is
+                    // already an element there, and elements are never removed.
+                    let arg = unsafe { self.args.get_mut(idx).unwrap_unchecked() };
+                    arg.out.capture(arg.ctx, &mut source)?;
                 }
                 ArgSegment::Value(val) => {
                     self.sink.consume_value(val)?;
@@ -173,30 +181,30 @@ pub fn test_helper<'a>(name: &'static str, input: &[&'a str]) -> Result<(), ArgE
         .add(Arg::from_out(ArgOut::Flag(&mut q)).with_short(b'q'))
         .add(Arg::new(&mut w).with_short(b'w'))
         .add(Arg::new(&mut e).with_short(b'e'))
-        .add(Arg::new(&mut r).with_long("r"))
-        .add(Arg::new(&mut t).with_long("t"))
-        .add(Arg::new(&mut y).with_long("y"))
+        .add(Arg::new(&mut r).with_long(&"r"))
+        .add(Arg::new(&mut t).with_long(&"t"))
+        .add(Arg::new(&mut y).with_long(&"y"))
         // Large ints
         .add(Arg::new(&mut u).with_short(b'u'))
         .add(Arg::new(&mut i).with_short(b'i'))
         .add(Arg::new(&mut o).with_short(b'o'))
-        .add(Arg::new(&mut p).with_long("p"))
-        .add(Arg::new(&mut a).with_long("a"))
-        .add(Arg::new(&mut s).with_long("s"))
+        .add(Arg::new(&mut p).with_long(&"p"))
+        .add(Arg::new(&mut a).with_long(&"a"))
+        .add(Arg::new(&mut s).with_long(&"s"))
         // Lots of floats
         .add(Arg::new(&mut d).with_short(b'd'))
         .add(Arg::new(&mut f).with_short(b'f'))
         .add(Arg::new(&mut g).with_short(b'g'))
-        .add(Arg::new(&mut h).with_long("h"))
-        .add(Arg::new(&mut j).with_long("j"))
-        .add(Arg::new(&mut k).with_long("k"))
+        .add(Arg::new(&mut h).with_long(&"h"))
+        .add(Arg::new(&mut j).with_long(&"j"))
+        .add(Arg::new(&mut k).with_long(&"k"))
         // Stringy cheese
         .add(Arg::new(&mut l).with_short(b'l'))
         .add(Arg::new(&mut z).with_short(b'z'))
         .add(Arg::new(&mut x).with_short(b'x'))
-        .add(Arg::new(&mut c).with_long("c"))
-        .add(Arg::new(&mut v).with_long("v"))
-        .add(Arg::new(&mut b).with_long("b"));
+        .add(Arg::new(&mut c).with_long(&"c"))
+        .add(Arg::new(&mut v).with_long(&"v"))
+        .add(Arg::new(&mut b).with_long(&"b"));
 
     for _ in 0..100_000_000 {
         args.parse(input.iter().copied())?;
