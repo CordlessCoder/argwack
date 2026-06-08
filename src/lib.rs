@@ -1,7 +1,9 @@
+#![no_std]
 #![deny(clippy::missing_safety_doc)]
 use rustc_hash::FxHashMapSeed;
 use soa_rs::Soa;
 use thiserror::Error;
+extern crate alloc;
 
 mod arg;
 use crate::{
@@ -16,7 +18,7 @@ pub use help::HelpMessage;
 // use source::*;
 
 pub mod prelude {
-    // use std::str::FromStr;
+    // use str::FromStr;
 
     pub use crate::{ArgError, Arguments, arg::Arg, arg::ArgOut};
     //
@@ -154,7 +156,7 @@ impl<'s> ArgumentSink<'s> for () {
     }
 }
 
-impl<'s> ArgumentSink<'s> for Vec<&'s str> {
+impl<'s> ArgumentSink<'s> for alloc::vec::Vec<&'s str> {
     #[inline(always)]
     fn consume_value(&mut self, value: &'s str) -> Result<(), ArgError<'s>> {
         self.push(value);

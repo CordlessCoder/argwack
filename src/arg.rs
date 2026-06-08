@@ -1,4 +1,4 @@
-use std::{
+use core::{
     fmt::{Debug, Display},
     num::NonZeroU8,
     str::FromStr,
@@ -50,7 +50,7 @@ impl<'o, 'e> ArgOut<'o, 'e> {
 }
 
 impl Debug for ArgOut<'_, '_> {
-    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, out: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         use ArgOut::*;
         match self {
             Int(v) => write!(out, "Int({v:?})"),
@@ -147,7 +147,7 @@ pub struct ArgContext {
 }
 
 impl Debug for ArgContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("ArgContext")
             .field("short", &self.short.map(|v| v.get() as char))
             .field("long", &self.long)
@@ -157,7 +157,7 @@ impl Debug for ArgContext {
 }
 
 impl Display for ArgContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let help = self.help.unwrap_or("[No help message]");
         if self.short.is_none() && self.long.is_none() {
             f.write_str("No flags set!")?;

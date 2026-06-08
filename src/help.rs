@@ -1,11 +1,11 @@
-use std::fmt::Display;
+use core::fmt::Display;
 
 use crate::Arguments;
 
 pub struct HelpMessage<'a, S>(pub(crate) &'a Arguments<'a, 'a, S>);
 
 impl<S> Display for HelpMessage<'_, S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         let args = self.0;
         if let Some(name) = args.program_name {
             writeln!(f, "{name}")?;
