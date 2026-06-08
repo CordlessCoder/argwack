@@ -3,43 +3,46 @@ use std::{hint::black_box, time::Instant};
 
 fn main() {
     let [mut q, mut w, mut e, mut r, mut t, mut y] = [false; _];
-    let [mut u, mut i, mut o, mut p, mut a, mut s] = [OptFromStrWrapper::<i64>::NotFound; _];
-    let [mut d, mut f, mut g, mut h, mut j, mut k] = [OptFromStrWrapper::<f64>::NotFound; _];
+    let [mut u, mut i, mut o, mut p, mut a, mut s] = [None::<i64>; _];
+    let [mut d, mut f, mut g, mut h, mut j, mut k] = [None::<f64>; _];
     let [mut l, mut z, mut x, mut c, mut v, mut b] = [None::<&str>; _];
-    let mut args = Arguments::new()
+    let mut args: Arguments<'_, '_, ()> = Arguments::new();
+    args
         // Bools
-        .add(opt_by_ref(&mut q).with_short(b'q'))
-        .add(opt_by_ref(&mut w).with_short(b'w'))
-        .add(opt_by_ref(&mut e).with_short(b'e'))
-        .add(opt_by_ref(&mut r).with_long("r"))
-        .add(opt_by_ref(&mut t).with_long("t"))
-        .add(opt_by_ref(&mut y).with_long("y"))
+        .add(Arg::from_out(ArgOut::Flag(&mut q)).with_short(b'q'))
+        .add(Arg::new(&mut w).with_short(b'w'))
+        .add(Arg::new(&mut e).with_short(b'e'))
+        .add(Arg::new(&mut r).with_long("r"))
+        .add(Arg::new(&mut t).with_long("t"))
+        .add(Arg::new(&mut y).with_long("y"))
         // Large ints
-        .add(opt_by_ref(&mut u).with_short(b'u'))
-        .add(opt_by_ref(&mut i).with_short(b'i'))
-        .add(opt_by_ref(&mut o).with_short(b'o'))
-        .add(opt_by_ref(&mut p).with_long("p"))
-        .add(opt_by_ref(&mut a).with_long("a"))
-        .add(opt_by_ref(&mut s).with_long("s"))
+        .add(Arg::new(&mut u).with_short(b'u'))
+        .add(Arg::new(&mut i).with_short(b'i'))
+        .add(Arg::new(&mut o).with_short(b'o'))
+        .add(Arg::new(&mut p).with_long("p"))
+        .add(Arg::new(&mut a).with_long("a"))
+        .add(Arg::new(&mut s).with_long("s"))
         // Lots of floats
-        .add(opt_by_ref(&mut d).with_short(b'd'))
-        .add(opt_by_ref(&mut f).with_short(b'f'))
-        .add(opt_by_ref(&mut g).with_short(b'g'))
-        .add(opt_by_ref(&mut h).with_long("h"))
-        .add(opt_by_ref(&mut j).with_long("j"))
-        .add(opt_by_ref(&mut k).with_long("k"))
+        .add(Arg::new(&mut d).with_short(b'd'))
+        .add(Arg::new(&mut f).with_short(b'f'))
+        .add(Arg::new(&mut g).with_short(b'g'))
+        .add(Arg::new(&mut h).with_long("h"))
+        .add(Arg::new(&mut j).with_long("j"))
+        .add(Arg::new(&mut k).with_long("k"))
         // Stringy cheese
-        .add(opt_by_ref(&mut l).with_short(b'l'))
-        .add(opt_by_ref(&mut z).with_short(b'z'))
-        .add(opt_by_ref(&mut x).with_short(b'x'))
-        .add(opt_by_ref(&mut c).with_long("c"))
-        .add(opt_by_ref(&mut v).with_long("v"))
-        .add(opt_by_ref(&mut b).with_long("b"));
+        .add(Arg::new(&mut l).with_short(b'l'))
+        .add(Arg::new(&mut z).with_short(b'z'))
+        .add(Arg::new(&mut x).with_short(b'x'))
+        .add(Arg::new(&mut c).with_long("c"))
+        .add(Arg::new(&mut v).with_long("v"))
+        .add(Arg::new(&mut b).with_long("b"));
 
     let start = Instant::now();
     for _ in 0..1_000_000 {
-        args.parse(black_box(&["", "-q", "-q", "-q", "-q", "-q", "-q"]))
-            .unwrap();
+        args.parse(black_box(
+            ["", "-q", "-q", "-q", "-q", "-q", "-q"].iter().copied(),
+        ))
+        .unwrap();
         black_box(&args);
     }
     let took = start.elapsed();
@@ -53,7 +56,7 @@ fn main() {
     .as_slice();
     let start = Instant::now();
     for _ in 0..1_000_000 {
-        args.parse(black_box(opts)).unwrap();
+        args.parse(black_box(opts.iter().copied())).unwrap();
         black_box(&args);
     }
     let took = start.elapsed();

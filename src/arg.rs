@@ -1,15 +1,136 @@
-use crate::ArgumentValue;
 use std::{
     fmt::{Debug, Display},
-    marker::PhantomData,
     num::NonZeroU8,
+    str::FromStr,
 };
 
-#[derive(Debug, Default)]
-pub struct Arg<'s, T: ArgumentValue<'s>> {
+use crate::{ArgError, source::AnyArgSource};
+
+pub enum ArgOut<'out, 'ext> {
+    Int(&'out mut Option<i64>),
+    Float(&'out mut Option<f64>),
+    Flag(&'out mut bool),
+    Count(&'out mut u32),
+    Str(&'out mut Option<&'ext str>),
+    Call(
+        &'out mut dyn FnMut(&ArgContext, &mut dyn AnyArgSource<'ext>) -> Result<(), ArgError<'ext>>,
+    ),
+}
+
+impl Debug for ArgOut<'_, '_> {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use ArgOut::*;
+        match self {
+            Int(v) => write!(out, "Int({v:?})"),
+            Float(v) => write!(out, "Float({v:?})"),
+            Flag(v) => write!(out, "Flag({v})"),
+            Count(v) => write!(out, "Count({v})"),
+            Str(v) => write!(out, "Str({v:?})"),
+            Call(_) => write!(out, "Call"),
+        }
+    }
+}
+
+impl<'out> From<&'out mut Option<f64>> for ArgOut<'out, '_> {
+    fn from(value: &'out mut Option<f64>) -> Self {
+        ArgOut::Float(value)
+    }
+}
+impl<'out> From<&'out mut Option<i64>> for ArgOut<'out, '_> {
+    fn from(value: &'out mut Option<i64>) -> Self {
+        ArgOut::Int(value)
+    }
+}
+impl<'out, 'ext> From<&'out mut Option<&'ext str>> for ArgOut<'out, 'ext> {
+    fn from(value: &'out mut Option<&'ext str>) -> Self {
+        ArgOut::Str(value)
+    }
+}
+impl<'out> From<&'out mut bool> for ArgOut<'out, '_> {
+    fn from(value: &'out mut bool) -> Self {
+        ArgOut::Flag(value)
+    }
+}
+
+#[derive(Debug)]
+#[must_use]
+pub struct Arg<'out, 'ext> {
     pub ctx: ArgContext,
-    pub out: T,
-    pub(crate) _phantom: PhantomData<&'s ()>,
+    pub out: ArgOut<'out, 'ext>,
+}
+
+fn capture_from_str<'ext, T: FromStr>(
+    out: &mut Option<T>,
+    ctx: &ArgContext,
+    source: &mut impl AnyArgSource<'ext>,
+) -> Result<(), ArgError<'ext>> {
+    let value = source
+        .next_value()
+        .ok_or(ArgError::MissingValueForOpt(*ctx))?;
+    let parsed = value
+        .parse()
+        .ok()
+        .ok_or(ArgError::InvalidValueForOpt(*ctx, value))?;
+    *out = Some(parsed);
+    Ok(())
+}
+
+impl<'o, 'e> Arg<'o, 'e> {
+    #[inline(always)]
+    pub fn new<T: Into<ArgOut<'o, 'e>>>(val: T) -> Self {
+        Self {
+            ctx: ArgContext::empty(),
+            out: val.into(),
+        }
+    }
+    #[inline(always)]
+    pub fn from_out(val: ArgOut<'o, 'e>) -> Self {
+        Self {
+            ctx: ArgContext::empty(),
+            out: val,
+        }
+    }
+    #[inline(always)]
+    pub fn with_short(mut self, short: u8) -> Self {
+        self.ctx.short = short.try_into().ok();
+        self
+    }
+    #[inline(always)]
+    pub fn with_long(mut self, long: &'static str) -> Self {
+        self.ctx.long = Some(long);
+        self
+    }
+    #[inline(always)]
+    pub fn with_help(mut self, help: &'static str) -> Self {
+        self.ctx.help = Some(help);
+        self
+    }
+    pub(crate) fn capture(
+        &mut self,
+        source: &mut impl AnyArgSource<'e>,
+    ) -> Result<(), ArgError<'e>> {
+        use ArgOut::*;
+        match &mut self.out {
+            Flag(f) => **f = true,
+            Count(c) => **c += 1,
+            Str(s) => {
+                let value = source
+                    .next_value()
+                    .ok_or(ArgError::MissingValueForOpt(self.ctx))?;
+                **s = Some(value);
+            }
+            Int(i) => {
+                capture_from_str(i, &self.ctx, source)?;
+            }
+            Float(f) => {
+                capture_from_str(f, &self.ctx, source)?;
+            }
+            Call(c) => {
+                c(&self.ctx, source)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Default, Clone, Copy)]

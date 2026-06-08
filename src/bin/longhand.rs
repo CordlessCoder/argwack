@@ -1,0 +1,10 @@
+fn main() {
+    argwack::test_helper(
+        "benchmark-longhand",
+        &[
+            "--r", "--t", "--y", "--p", "0", "--a", "1", "--s", "2", "--h", "0.0", "--j", "1.0",
+            "--k", "2.0", "--c", "'str0'", "--v", "'str1'", "--b", "'str2'",
+        ],
+    )
+    .unwrap();
+}

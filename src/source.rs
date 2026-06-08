@@ -5,17 +5,22 @@ enum Saved<'a> {
     Shorts(&'a [u8]),
 }
 
+pub trait AnyArgSource<'a> {
+    fn next_value(&mut self) -> Option<&'a str>;
+    fn next(&mut self) -> Option<ArgSegment<'a>>;
+}
+
 #[derive(Debug, Clone)]
-pub struct ArgSource<'s, 'a> {
-    args: core::slice::Iter<'s, &'a str>,
+pub struct ArgSource<'a, I> {
+    args: I,
     saved: Saved<'a>,
 }
 
-impl<'s, 'a> ArgSource<'s, 'a> {
+impl<'a, I> ArgSource<'a, I> {
     #[inline(always)]
-    pub fn new(args: &'s [&'a str]) -> Self {
+    pub fn new(args: I) -> Self {
         Self {
-            args: args.iter(),
+            args,
             saved: Saved::Empty,
         }
     }
@@ -28,9 +33,9 @@ pub enum ArgSegment<'s> {
     Value(&'s str),
 }
 
-impl<'s, 'a> ArgSource<'s, 'a> {
+impl<'a, I: Iterator<Item = &'a str>> AnyArgSource<'a> for ArgSource<'a, I> {
     #[inline(always)]
-    pub fn next_value(&mut self) -> Option<&'a str> {
+    fn next_value(&mut self) -> Option<&'a str> {
         match self.saved {
             Saved::Empty | Saved::Shorts([]) => (),
             Saved::Value(val) => {
@@ -49,7 +54,7 @@ impl<'s, 'a> ArgSource<'s, 'a> {
         Some(first)
     }
     #[inline(always)]
-    pub fn next(&mut self) -> Option<ArgSegment<'a>> {
+    fn next(&mut self) -> Option<ArgSegment<'a>> {
         match self.saved {
             Saved::Empty | Saved::Shorts([]) => (),
             Saved::Value(val) => {
