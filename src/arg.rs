@@ -9,10 +9,10 @@ use soa_rs::Soars;
 
 use crate::{ArgError, Arguments, SubcommandSink, source::AnyArgSource};
 
-type DelimitedCallback<'out, 'ext> =
-    &'out mut dyn FnMut(&ArgContext, &str) -> Result<(), ArgError<'ext>>;
-type Callback<'out, 'ext> =
-    &'out mut dyn FnMut(&ArgContext, &mut dyn AnyArgSource<'ext>) -> Result<(), ArgError<'ext>>;
+pub type DelimitedCallback<'out, 'ext> =
+    &'out mut dyn FnMut(ArgContext, &'ext str) -> Result<(), ArgError<'ext>>;
+pub type Callback<'out, 'ext> =
+    &'out mut dyn FnMut(ArgContext, &mut dyn AnyArgSource<'ext>) -> Result<(), ArgError<'ext>>;
 
 pub enum ArgOut<'out, 'ext> {
     Int(&'out mut Option<i64>),
@@ -21,9 +21,7 @@ pub enum ArgOut<'out, 'ext> {
     Count(&'out mut u32),
     Str(&'out mut Option<&'ext str>),
     DelimitedCall(char, DelimitedCallback<'out, 'ext>),
-    Call(
-        &'out mut dyn FnMut(&ArgContext, &mut dyn AnyArgSource<'ext>) -> Result<(), ArgError<'ext>>,
-    ),
+    Call(Callback<'out, 'ext>),
     Subcommand(Box<Arguments<'out, 'ext, SubcommandSink>>),
 }
 
@@ -50,14 +48,14 @@ impl<'o, 'e> ArgOut<'o, 'e> {
                 **f = Some(capture_from_str(ctx, source)?);
             }
             Call(c) => {
-                c(ctx, source)?;
+                c(*ctx, source)?;
             }
             DelimitedCall(del, c) => {
                 let val = source
                     .next_value()
                     .ok_or(ArgError::MissingValueForOpt(*ctx))?;
                 for val in val.split(*del) {
-                    c(ctx, val)?;
+                    c(*ctx, val)?;
                 }
             }
             Subcommand(sub) => match sub.parse(source) {
@@ -154,12 +152,12 @@ impl<'o, 'e> Arg<'o, 'e> {
         self
     }
     #[inline(always)]
-    pub fn with_long(mut self, long: &'static &'static str) -> Self {
+    pub fn with_long(mut self, long: &'static str) -> Self {
         self.ctx.long = Some(long);
         self
     }
     #[inline(always)]
-    pub fn with_help(mut self, help: &'static &'static str) -> Self {
+    pub fn with_help(mut self, help: &'static str) -> Self {
         self.ctx.help = Some(help);
         self
     }
