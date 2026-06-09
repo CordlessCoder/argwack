@@ -8,6 +8,7 @@ enum Saved<'a> {
 pub trait AnyArgSource<'a> {
     fn next_value(&mut self) -> Option<&'a str>;
     fn next(&mut self) -> Option<ArgSegment<'a>>;
+    fn inject_val(&mut self, val: &'a str);
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +35,10 @@ pub enum ArgSegment<'s> {
 }
 
 impl<'a, I: Iterator<Item = &'a str>> AnyArgSource<'a> for ArgSource<'a, I> {
+    #[inline(always)]
+    fn inject_val(&mut self, val: &'a str) {
+        self.saved = Saved::Value(val);
+    }
     #[inline(always)]
     fn next_value(&mut self) -> Option<&'a str> {
         match self.saved {

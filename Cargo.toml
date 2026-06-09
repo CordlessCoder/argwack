@@ -7,6 +7,7 @@ default-run = "argwack"
 [profile.release]
 lto = "fat"
 codegen-units = 1
+debug = "full"
 
 [dependencies]
 memchr = "2.8.1"

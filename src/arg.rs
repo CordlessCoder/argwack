@@ -4,9 +4,15 @@ use core::{
     str::FromStr,
 };
 
+use alloc::boxed::Box;
 use soa_rs::Soars;
 
-use crate::{ArgError, source::AnyArgSource};
+use crate::{ArgError, Arguments, SubcommandSink, source::AnyArgSource};
+
+type DelimitedCallback<'out, 'ext> =
+    &'out mut dyn FnMut(&ArgContext, &str) -> Result<(), ArgError<'ext>>;
+type Callback<'out, 'ext> =
+    &'out mut dyn FnMut(&ArgContext, &mut dyn AnyArgSource<'ext>) -> Result<(), ArgError<'ext>>;
 
 pub enum ArgOut<'out, 'ext> {
     Int(&'out mut Option<i64>),
@@ -14,9 +20,11 @@ pub enum ArgOut<'out, 'ext> {
     Flag(&'out mut bool),
     Count(&'out mut u32),
     Str(&'out mut Option<&'ext str>),
+    DelimitedCall(char, DelimitedCallback<'out, 'ext>),
     Call(
         &'out mut dyn FnMut(&ArgContext, &mut dyn AnyArgSource<'ext>) -> Result<(), ArgError<'ext>>,
     ),
+    Subcommand(Box<Arguments<'out, 'ext, SubcommandSink>>),
 }
 
 impl<'o, 'e> ArgOut<'o, 'e> {
@@ -36,14 +44,28 @@ impl<'o, 'e> ArgOut<'o, 'e> {
                 **s = Some(value);
             }
             Int(i) => {
-                capture_from_str(i, ctx, source)?;
+                **i = Some(capture_from_str(ctx, source)?);
             }
             Float(f) => {
-                capture_from_str(f, ctx, source)?;
+                **f = Some(capture_from_str(ctx, source)?);
             }
             Call(c) => {
                 c(ctx, source)?;
             }
+            DelimitedCall(del, c) => {
+                let val = source
+                    .next_value()
+                    .ok_or(ArgError::MissingValueForOpt(*ctx))?;
+                for val in val.split(*del) {
+                    c(ctx, val)?;
+                }
+            }
+            Subcommand(sub) => match sub.parse(source) {
+                Err(ArgError::UnexpectedPositionalOpt(val)) => {
+                    source.inject_val(val);
+                }
+                otherwise => return otherwise,
+            },
         }
         Ok(())
     }
@@ -59,6 +81,8 @@ impl Debug for ArgOut<'_, '_> {
             Count(v) => write!(out, "Count({v})"),
             Str(v) => write!(out, "Str({v:?})"),
             Call(_) => write!(out, "Call"),
+            DelimitedCall(del, _) => write!(out, "DelimitedCall({del:?})"),
+            Subcommand(_) => write!(out, "Subcommand"),
         }
     }
 }
@@ -91,29 +115,31 @@ pub struct Arg<'out, 'ext> {
     pub ctx: ArgContext,
 }
 
-fn capture_from_str<'ext, T: FromStr>(
-    out: &mut Option<T>,
+pub fn capture_from_str<'ext, T: FromStr>(
     ctx: &ArgContext,
     source: &mut impl AnyArgSource<'ext>,
-) -> Result<(), ArgError<'ext>> {
+) -> Result<T, ArgError<'ext>> {
     let value = source
         .next_value()
         .ok_or(ArgError::MissingValueForOpt(*ctx))?;
-    let parsed = value
+    value
         .parse()
         .ok()
-        .ok_or(ArgError::InvalidValueForOpt(*ctx, value))?;
-    *out = Some(parsed);
-    Ok(())
+        .ok_or(ArgError::InvalidValueForOpt(*ctx, value))
 }
 
 impl<'o, 'e> Arg<'o, 'e> {
     #[inline(always)]
     pub fn new<T: Into<ArgOut<'o, 'e>>>(val: T) -> Self {
-        Self {
-            ctx: ArgContext::empty(),
-            out: val.into(),
-        }
+        Self::from_out(val.into())
+    }
+    #[inline(always)]
+    pub fn callback(cb: Callback<'o, 'e>) -> Self {
+        Self::from_out(ArgOut::Call(cb))
+    }
+    #[inline(always)]
+    pub fn delimited(del: char, cb: DelimitedCallback<'o, 'e>) -> Self {
+        Self::from_out(ArgOut::DelimitedCall(del, cb))
     }
     #[inline(always)]
     pub fn from_out(val: ArgOut<'o, 'e>) -> Self {

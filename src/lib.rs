@@ -1,5 +1,6 @@
 #![no_std]
 #![deny(clippy::missing_safety_doc)]
+use alloc::{string::String, vec::Vec};
 use rustc_hash::FxHashMapSeed;
 use soa_rs::Soa;
 use thiserror::Error;
@@ -8,19 +9,20 @@ extern crate alloc;
 mod arg;
 use crate::{
     arg::ArgContext,
-    source::{AnyArgSource, ArgSegment, ArgSource},
+    source::{AnyArgSource, ArgSegment},
 };
 
 mod help;
 mod source;
 pub use crate::arg::{Arg, ArgOut};
+pub use crate::source::ArgSource;
 pub use help::HelpMessage;
 // use source::*;
 
 pub mod prelude {
     // use str::FromStr;
 
-    pub use crate::{ArgError, Arguments, arg::Arg, arg::ArgOut};
+    pub use crate::{ArgError, ArgOut, ArgSource, Arguments, arg::Arg};
     //
     // #[inline(always)]
     // pub fn opt_from_str<'s, T: FromStr>() -> Arg<'s, OptFromStrWrapper<T>>
@@ -55,6 +57,10 @@ pub enum ArgError<'s> {
     UnknownShortOption(char),
     #[error("Unkown long option: {0}")]
     UnknownLongOption(&'s str),
+    #[error("{0}")]
+    UnexpectedPositionalOpt(&'s str),
+    #[error("{0}")]
+    Custom(String),
 }
 
 #[must_use]
@@ -93,6 +99,22 @@ impl<S> Arguments<'_, '_, S> {
     }
 }
 
+impl<'o, 'e> Arguments<'o, 'e, PositionalSink<'o, 'e>> {
+    #[inline]
+    pub fn new_with_positional(positional: Vec<ArgOut<'o, 'e>>) -> Self {
+        Self {
+            args: Soa::new(),
+            sink: PositionalSink {
+                idx: 0,
+                args: positional,
+            },
+            program_name: None,
+            short_lut: [usize::MAX; _],
+            long_map: FxHashMapSeed::with_hasher(rustc_hash::FxSeededState::with_seed(12345)),
+        }
+    }
+}
+
 impl<'out, 'ext, S: ArgumentSink<'ext>> Arguments<'out, 'ext, S> {
     pub fn add(&mut self, arg: Arg<'out, 'ext>) -> &mut Self {
         let idx = self.args.len();
@@ -106,17 +128,9 @@ impl<'out, 'ext, S: ArgumentSink<'ext>> Arguments<'out, 'ext, S> {
         self.args.push(arg);
         self
     }
-    pub fn parse(
-        &mut self,
-        args: impl IntoIterator<Item = &'ext str>,
-    ) -> Result<(), ArgError<'ext>> {
-        let args = args.into_iter();
-        let mut source = ArgSource::new(args);
+    pub fn parse(&mut self, source: &mut impl AnyArgSource<'ext>) -> Result<(), ArgError<'ext>> {
         while let Some(segment) = source.next() {
             match segment {
-                ArgSegment::Short(0) => {
-                    return Err(ArgError::UnknownShortOption('\0'));
-                }
                 ArgSegment::Short(short) => {
                     let idx = self.short_lut[short as usize];
                     if idx == usize::MAX {
@@ -125,7 +139,7 @@ impl<'out, 'ext, S: ArgumentSink<'ext>> Arguments<'out, 'ext, S> {
                     // SAFETY: An index may only be inserted into self.short_lut if there is
                     // already an element there, and elements are never removed.
                     let arg = unsafe { self.args.get_mut(idx).unwrap_unchecked() };
-                    arg.out.capture(arg.ctx, &mut source)?;
+                    arg.out.capture(arg.ctx, source)?;
                 }
                 ArgSegment::Long(long) => {
                     let Some(&idx) = self.long_map.get(long) else {
@@ -134,10 +148,10 @@ impl<'out, 'ext, S: ArgumentSink<'ext>> Arguments<'out, 'ext, S> {
                     // SAFETY: An index may only be inserted into self.long_map if there is
                     // already an element there, and elements are never removed.
                     let arg = unsafe { self.args.get_mut(idx).unwrap_unchecked() };
-                    arg.out.capture(arg.ctx, &mut source)?;
+                    arg.out.capture(arg.ctx, source)?;
                 }
                 ArgSegment::Value(val) => {
-                    self.sink.consume_value(val)?;
+                    self.sink.consume_value(val, source)?;
                 }
             }
         }
@@ -146,19 +160,64 @@ impl<'out, 'ext, S: ArgumentSink<'ext>> Arguments<'out, 'ext, S> {
 }
 
 pub trait ArgumentSink<'s> {
-    fn consume_value(&mut self, value: &'s str) -> Result<(), ArgError<'s>>;
+    fn consume_value(
+        &mut self,
+        value: &'s str,
+        rest: &mut impl AnyArgSource<'s>,
+    ) -> Result<(), ArgError<'s>>;
+}
+
+pub struct SubcommandSink;
+
+impl<'s> ArgumentSink<'s> for SubcommandSink {
+    fn consume_value(
+        &mut self,
+        value: &'s str,
+        _rest: &mut impl AnyArgSource<'s>,
+    ) -> Result<(), ArgError<'s>> {
+        Err(ArgError::UnexpectedPositionalOpt(value))
+    }
+}
+
+pub struct PositionalSink<'o, 'e> {
+    idx: usize,
+    args: Vec<ArgOut<'o, 'e>>,
+}
+
+impl<'s> ArgumentSink<'s> for PositionalSink<'_, 's> {
+    fn consume_value(
+        &mut self,
+        value: &'s str,
+        rest: &mut impl AnyArgSource<'s>,
+    ) -> Result<(), ArgError<'s>> {
+        if self.idx >= self.args.len() {
+            return Err(ArgError::UnexpectedPositionalOpt(value));
+        }
+        let arg = &mut self.args[self.idx];
+        arg.capture(&ArgContext::empty(), rest)?;
+        self.idx += 1;
+        Ok(())
+    }
 }
 
 impl<'s> ArgumentSink<'s> for () {
     #[inline(always)]
-    fn consume_value(&mut self, _value: &'s str) -> Result<(), ArgError<'s>> {
+    fn consume_value(
+        &mut self,
+        _value: &'s str,
+        _rest: &mut impl AnyArgSource<'s>,
+    ) -> Result<(), ArgError<'s>> {
         Ok(())
     }
 }
 
 impl<'s> ArgumentSink<'s> for alloc::vec::Vec<&'s str> {
     #[inline(always)]
-    fn consume_value(&mut self, value: &'s str) -> Result<(), ArgError<'s>> {
+    fn consume_value(
+        &mut self,
+        value: &'s str,
+        _rest: &mut impl AnyArgSource<'s>,
+    ) -> Result<(), ArgError<'s>> {
         self.push(value);
         Ok(())
     }
@@ -166,7 +225,11 @@ impl<'s> ArgumentSink<'s> for alloc::vec::Vec<&'s str> {
 
 impl<'s, C: FnMut(&'s str) -> Result<(), ArgError<'s>>> ArgumentSink<'s> for C {
     #[inline(always)]
-    fn consume_value(&mut self, value: &'s str) -> Result<(), ArgError<'s>> {
+    fn consume_value(
+        &mut self,
+        value: &'s str,
+        _rest: &mut impl AnyArgSource<'s>,
+    ) -> Result<(), ArgError<'s>> {
         self(value)
     }
 }
@@ -180,7 +243,7 @@ pub fn test_helper<'a>(name: &'static str, input: &[&'a str]) -> Result<(), ArgE
     args.program_name = Some(name);
     args
         // Bools
-        .add(Arg::from_out(ArgOut::Flag(&mut q)).with_short(b'q'))
+        .add(Arg::new(&mut q).with_short(b'q'))
         .add(Arg::new(&mut w).with_short(b'w'))
         .add(Arg::new(&mut e).with_short(b'e'))
         .add(Arg::new(&mut r).with_long(&"r"))
@@ -209,7 +272,7 @@ pub fn test_helper<'a>(name: &'static str, input: &[&'a str]) -> Result<(), ArgE
         .add(Arg::new(&mut b).with_long(&"b"));
 
     for _ in 0..100_000_000 {
-        args.parse(input.iter().copied())?;
+        args.parse(&mut ArgSource::new(input.iter().copied()))?;
     }
     Ok(())
 }
